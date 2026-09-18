@@ -1,0 +1,11 @@
+# nome	url	condicao jq sobre a resposta (vazio = so status 200 e HTML)	header
+sitepet	https://pet.inf.ufes.br/		
+sitepet-api	https://api.pet.inf.ufes.br/api/news/	.news | length > 0	
+estatisticas	https://estatistica.pet.inf.ufes.br/		
+estatisticas-api	https://apiestatisticas.pet.inf.ufes.br/viewSortedGrid	(.ecomp | length > 0) and (.ccomp | length > 0)	
+game-jam	https://gamejam.pet.inf.ufes.br/		
+game-jam-api	https://apigamejam.pet.inf.ufes.br/seasons/atual	.id != null	
+ct-portas-abertas	https://ctportasabertas.pet.inf.ufes.br/		
+avaliacao-360	https://avaliacao360.pet.inf.ufes.br/api/auth/providers	.google.id == "google"	
+introcomp	https://introcomp.pet.inf.ufes.br/		
+introcomp-api	https://introcomp-api.pet.inf.ufes.br/members/active	length > 0	authorization: $INTROCOMP_API_TOKEN

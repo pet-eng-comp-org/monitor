@@ -1,0 +1,49 @@
+name: monitor
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write   # manter o agendamento vivo (ver ultimo passo)
+
+concurrency: monitor
+
+jobs:
+  checar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Restaura o estado da rodada anterior
+        uses: actions/cache/restore@v4
+        with:
+          path: estado
+          key: estado-${{ github.run_id }}
+          restore-keys: estado-
+
+      - name: Checa os sites
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          INTROCOMP_API_TOKEN: ${{ secrets.INTROCOMP_API_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: ./monitor.sh
+
+      - name: Guarda o estado
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: estado
+          key: estado-${{ github.run_id }}
+
+      # O GitHub desativa workflow agendado de repo publico apos 60 dias sem
+      # atividade. Reativar pela API no dia 1 de cada mes evita isso sem commits.
+      - name: Mantem o agendamento vivo
+        if: always() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ "$(date -u +%d%H%M | cut -c1-4)" = "0100" ] || exit 0
+          gh api -X PUT "repos/${{ github.repository }}/actions/workflows/monitor.yml/enable"
