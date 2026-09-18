@@ -1,11 +1,11 @@
-# nome	url	condicao jq sobre a resposta (vazio = so status 200 e HTML)	header
-sitepet	https://pet.inf.ufes.br/		
-sitepet-api	https://api.pet.inf.ufes.br/api/news/	.news | length > 0	
-estatisticas	https://estatistica.pet.inf.ufes.br/		
-estatisticas-api	https://apiestatisticas.pet.inf.ufes.br/viewSortedGrid	(.ecomp | length > 0) and (.ccomp | length > 0)	
-game-jam	https://gamejam.pet.inf.ufes.br/		
-game-jam-api	https://apigamejam.pet.inf.ufes.br/seasons/atual	.id != null	
-ct-portas-abertas	https://ctportasabertas.pet.inf.ufes.br/		
-avaliacao-360	https://avaliacao360.pet.inf.ufes.br/api/auth/providers	.google.id == "google"	
-introcomp	https://introcomp.pet.inf.ufes.br/		
-introcomp-api	https://introcomp-api.pet.inf.ufes.br/members/active	length > 0	authorization: $INTROCOMP_API_TOKEN
+# grupo	nome	url	condicao (vazio = 200 com HTML; "responde" = qualquer HTTP; senao expressao jq)	header
+# grupo vm: Traefik atendendo no IP da VM. Se falha, os outros grupos ficam em silencio.
+vm	traefik	https://200.137.66.9/	responde	
+sites	sitepet	https://pet.inf.ufes.br/		
+sites	sitepet-api	https://api.pet.inf.ufes.br/api/news/	.news | length > 0	
+sites	estatisticas	https://estatistica.pet.inf.ufes.br/		
+sites	estatisticas-api	https://apiestatisticas.pet.inf.ufes.br/viewSortedGrid	(.ecomp | length > 0) and (.ccomp | length > 0)	
+sites	game-jam	https://gamejam.pet.inf.ufes.br/		
+sites	game-jam-api	https://apigamejam.pet.inf.ufes.br/seasons/atual	.id != null	
+sites	ct-portas-abertas	https://ctportasabertas.pet.inf.ufes.br/		
+sites	avaliacao-360	https://avaliacao360.pet.inf.ufes.br/api/auth/providers	.google.id == "google"	

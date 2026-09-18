@@ -26,8 +26,9 @@ jobs:
 
       - name: Checa os sites
         env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          INTROCOMP_API_TOKEN: ${{ secrets.INTROCOMP_API_TOKEN }}
+          NTFY_TOPIC_VM: ${{ secrets.NTFY_TOPIC_VM }}
+          NTFY_TOPIC_SITES: ${{ secrets.NTFY_TOPIC_SITES }}
+          GRUPOS_EMAIL: vm
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: ./monitor.sh
 
