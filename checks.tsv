@@ -1,10 +1,16 @@
 # grupo	nome	url	condicao (vazio = 200 com HTML; "responde" = qualquer HTTP; senao expressao jq)	header
 # grupo vm: Traefik atendendo no IP da VM. Se falha, os outros grupos ficam em silencio.
+#
+# Condicao de API mede o dado, nao o envelope: /viewSortedGrid sempre devolve os
+# 11 baldes de periodo, mesmo com o banco vazio, entao contar os baldes daria OK
+# com o site sem nada. O banco do estatisticas vive num volume; se ele sumir, o
+# backend sobe e cria um SQLite vazio, e e esse caso que precisa disparar.
 vm	traefik	https://200.137.66.9/	responde	
 sites	sitepet	https://pet.inf.ufes.br/		
 sites	sitepet-api	https://api.pet.inf.ufes.br/api/news/	.news | length > 0	
 sites	estatisticas	https://estatistica.pet.inf.ufes.br/		
-sites	estatisticas-api	https://apiestatisticas.pet.inf.ufes.br/viewSortedGrid	(.ecomp | length > 0) and (.ccomp | length > 0)	
+sites	estatisticas-api	https://apiestatisticas.pet.inf.ufes.br/viewSortedGrid	([.ecomp[].disciplinas[]] | length) > 100 and ([.ccomp[].disciplinas[]] | length) > 50	
+sites	estatisticas-notas	https://apiestatisticas.pet.inf.ufes.br/items/MAT15925	length > 0	
 sites	game-jam	https://gamejam.pet.inf.ufes.br/		
 sites	game-jam-api	https://apigamejam.pet.inf.ufes.br/seasons/atual	.id != null	
 sites	ct-portas-abertas	https://ctportasabertas.pet.inf.ufes.br/		
