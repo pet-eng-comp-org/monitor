@@ -7,7 +7,8 @@ sai do ar ou volta. Duas partes:
   `checks.tsv`.
 - **De dentro da VM** — `vm/monitor-vm.sh`, no cron do root a cada 5 minutos:
   Portainer, disco acima de 85%, container parado, `unhealthy` ou reiniciando em
-  loop. A VM inteira fora do ar é detectada pela parte de fora.
+  loop, e deploy que não chegou (ver abaixo). A VM inteira fora do ar é
+  detectada pela parte de fora.
 
 ## Quem recebe
 
@@ -39,3 +40,21 @@ estado, com lembrete a cada 6 h enquanto algo segue fora. Falha nova no grupo
 Instalado em `/opt/monitor/monitor-vm.sh` (700, root), tópico em
 `/opt/monitor/.ntfy-topic` (600, root), estado em `/opt/monitor/estado/`. Sem o
 arquivo do tópico, só registra no journal: `journalctl -t monitor-vm`.
+
+### Deploy que não chegou
+
+Para cada stack git-ops do Portainer, confere os dois elos que falham calados:
+
+- **busca** — o commit que o Portainer aplicou é o HEAD do ramo no GitHub? Deixa
+  de ser quando o token do Portainer vence ou o repositório muda de nome/dono.
+- **aplica** — as imagens dos containers da stack são as linhas `image:` do
+  compose que ele buscou?
+
+Diferença logo depois de um push é normal (o Portainer consulta a cada 5 min):
+só avisa se a mesma diferença dura 15 min. Também avisa 30 dias antes de um token
+do GitHub vencer.
+
+Lê a API do Portainer com o token do backup (`/opt/backups/.portainer-token`) e
+o GitHub com `/opt/monitor/.gh-token-<dono>` (600, root): o mesmo token, só
+leitura, que o Portainer usa para aquele dono, para que o vencimento dele apareça
+aqui. Sem o arquivo de um dono, só o elo *aplica* das stacks dele é conferido.
