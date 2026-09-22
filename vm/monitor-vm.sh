@@ -50,9 +50,13 @@ echo "$atuais" > "$ESTADO/restarts.txt"
 # elos, e cada um falha calado:
 #   busca  - o Portainer trouxe o ultimo commit? ConfigHash da stack == HEAD do
 #            ramo no GitHub. Para de bater se o token do Portainer vence ou o
-#            repositorio muda de nome ou de dono.
-#   aplica - os containers rodam o compose que ele trouxe? As imagens dos
-#            containers da stack == as linhas image: do compose clonado.
+#            repositorio muda de nome ou de dono. So em stack com polling ou
+#            webhook: a de atualizacao manual fica para tras de proposito.
+#   aplica - os containers rodam o compose que ele trouxe? Toda linha image:
+#            literal do compose tem container, e nenhum container roda outra
+#            versao de um repositorio que o compose cita. Linha com ${VAR} e
+#            servico so com build: ficam de fora (nome resolvido nao esta no
+#            arquivo); compose com profiles: nao cobra container faltando.
 # O Portainer consulta o repo a cada 5 min, entao diferenca logo depois de um push
 # e normal: so vira problema quando a MESMA diferenca dura ATRASO_S.
 # Token do GitHub em $DIR/.gh-token-<dono> (600): o mesmo que o Portainer usa para
@@ -85,12 +89,13 @@ elif docker run --rm --user root --network container:portainer -v "$SEG:/seg" cu
   declare -A token_visto=()
   # Separador \x1f, nao tab: tab e espaco em branco para o read, e ReferenceName
   # vazio (ramo padrao) juntaria os campos.
-  while IFS=$'\x1f' read -r id nome url ref hash arquivo; do
+  while IFS=$'\x1f' read -r id nome url ref hash arquivo auto; do
     repo=${url#https://github.com/}; repo=${repo%.git}; dono=${repo%%/*}
     tok="$DIR/.gh-token-$dono"
-    if [ -r "$tok" ]; then
+    if [ "$auto" = true ] && [ -r "$tok" ]; then
       printf 'Authorization: Bearer %s\n' "$(cat "$tok")" > "$SEG/gh"
       ramo=${ref#refs/heads/}; ramo=${ramo:-HEAD}
+      rm -f "$SEG/cab" "$SEG/sha"
       code=$(curl -s -m 20 -o "$SEG/sha" -D "$SEG/cab" -w '%{http_code}' -H @"$SEG/gh" \
                -H 'Accept: application/vnd.github.sha' "https://api.github.com/repos/$repo/commits/$ramo")
       if [ "$code" = 200 ]; then
@@ -101,22 +106,35 @@ elif docker run --rm --user root --network container:portainer -v "$SEG:/seg" cu
         problemas+=("deploy-github:$nome"$'\t'"$nome: GitHub respondeu HTTP $code para $repo (token vencido ou sem acesso?)")
       fi
       vence=$(tr -d '\r' < "$SEG/cab" | sed -n 's/^github-authentication-token-expiration: //Ip')
-      if [ -n "$vence" ] && [ -z "${token_visto[$dono]:-}" ]; then
+      vence_s=; [ -n "$vence" ] && vence_s=$(date -d "$vence" +%s 2>/dev/null)  # date -d "" = hoje
+      if [ -n "$vence_s" ] && [ -z "${token_visto[$dono]:-}" ]; then
         token_visto[$dono]=1
-        [ $(( $(date -d "$vence" +%s) - $(date +%s) )) -lt "$TOKEN_AVISO_S" ] && \
+        [ $(( vence_s - $(date +%s) )) -lt "$TOKEN_AVISO_S" ] && \
           problemas+=("token-vence:$dono"$'\t'"Token do GitHub de $dono vence em $(date -d "$vence" +%d/%m/%Y): trocar no Portainer e em $tok")
       fi
     fi
 
-    esperadas=$(sed -nE "s/^[[:space:]]*image:[[:space:]]*['\"]?([^'\" #]+).*/\1/p" "$COMPOSE/$id/$arquivo" 2>/dev/null | sort -u)
+    compose="$COMPOSE/$id/$arquivo"
+    esperadas=$(sed -nE "s/^[[:space:]]*image:[[:space:]]*['\"]?([^'\" #]+).*/\1/p" "$compose" 2>/dev/null \
+                  | grep -v '\$' | sort -u)
     rodando=$(docker ps -aq --filter "label=com.docker.compose.project=$nome" \
                 | xargs -r docker inspect --format '{{.Config.Image}}' | sort -u)
-    if [ "$esperadas" != "$rodando" ] && atrasado "aplica:$nome" "$hash"; then
-      logger -t monitor-vm "$nome: compose espera [$(echo $esperadas)], rodando [$(echo $rodando)]"
+    faltando=$(comm -23 <(echo "$esperadas") <(echo "$rodando") | sed '/^$/d')
+    grep -qE '^[[:space:]]*profiles:' "$compose" 2>/dev/null && faltando=
+    # repositorio = imagem sem @digest e sem :tag (o : depois da ultima /)
+    repos=$(echo "$esperadas" | sed -E 's/@.*//; s#:[^/:]*$##' | sort -u)
+    velhas=$(comm -13 <(echo "$esperadas") <(echo "$rodando") | sed '/^$/d' \
+               | while read -r img; do
+                   r=$(echo "$img" | sed -E 's/@.*//; s#:[^/:]*$##')
+                   grep -qxF "$r" <<< "$repos" && echo "$img"
+                 done)
+    if [ -n "$faltando$velhas" ] && atrasado "aplica:$nome" "$hash"; then
+      logger -t monitor-vm "$nome: sem container [$(echo $faltando)], versao antiga rodando [$(echo $velhas)]"
       problemas+=("deploy-aplica:$nome"$'\t'"$nome: containers nao rodam o compose de ${hash:0:7} (detalhe: journalctl -t monitor-vm)")
     fi
   done < <(jq -r '.[] | select(.GitConfig != null and .Status == 1)
-                  | [.Id, .Name, .GitConfig.URL, (.GitConfig.ReferenceName // ""), .GitConfig.ConfigHash, .EntryPoint]
+                  | [.Id, .Name, .GitConfig.URL, (.GitConfig.ReferenceName // ""), .GitConfig.ConfigHash, .EntryPoint,
+                     ((.AutoUpdate.Interval // "") != "" or (.AutoUpdate.Webhook // "") != "")]
                   | map(tostring) | join("\u001f")' "$SEG/stacks.json")
   sort -o "$ESTADO/deploy-desde.txt" "$SEG/desde" 2>/dev/null || : > "$ESTADO/deploy-desde.txt"
 else
