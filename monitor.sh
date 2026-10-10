@@ -25,6 +25,9 @@ checar() { # url condicao header -> 0 se ok; motivo em $motivo
       [ "$codigo" != 000 ] && { rm -f "$corpo"; return 0; }; motivo="sem resposta"
     elif [ "$codigo" != 200 ]; then motivo="HTTP $codigo"
     elif [ -z "$cond" ]; then grep -qi '<html' "$corpo" && { rm -f "$corpo"; return 0; }; motivo="200 sem HTML"
+    elif [[ "$cond" == texto:* ]]; then        # pagina HTML que precisa conter o padrao
+      grep -qE "${cond#texto:}" "$corpo" && { rm -f "$corpo"; return 0; }
+      motivo="200, mas sem o dado esperado (${cond#texto:})"
     elif jq -e "$cond" "$corpo" >/dev/null 2>&1; then rm -f "$corpo"; return 0
     else motivo="200, mas sem dados: $(head -c 120 "$corpo" | tr -d '\n')"; fi
     rm -f "$corpo"; [ $tentativa -lt 3 ] && sleep 10
