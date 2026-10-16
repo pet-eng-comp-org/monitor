@@ -1,0 +1,18 @@
+# Padrão do PET para dependências (o mesmo em todos os repositórios):
+# - semanal, às segundas;
+# - minor e patch num PR por grupo; major sempre em PR próprio, para ser lido
+#   e testado sozinho;
+# - as correções de segurança vêm juntas num PR só.
+# Este repositório não implanta nada: o PR só troca a versão das actions.
+
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
