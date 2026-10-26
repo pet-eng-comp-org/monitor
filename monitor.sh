@@ -2,8 +2,8 @@
 # Checa cada linha de checks.tsv e avisa no ntfy por grupo, so quando o estado
 # muda (ok -> falha, falha -> ok), com lembrete a cada 6 h enquanto algo segue fora.
 #
-# Cada grupo avisa no topico do secret NTFY_TOPIC_<GRUPO>; grupo sem topico nao
-# avisa. O grupo `vm` e a base: se ele falha, os sites caem junto por causa dele,
+# Cada grupo avisa no topico do secret NTFY_TOPIC_<GRUPO> (varios topicos
+# separados por espaco avisam todos); grupo sem topico nao avisa. O grupo `vm` e a base: se ele falha, os sites caem junto por causa dele,
 # entao os outros grupos nao avisam nem mudam de estado ate a VM voltar.
 #
 # Sai 1 quando ha falha nova num grupo de $GRUPOS_EMAIL, para o GitHub mandar
@@ -60,8 +60,10 @@ fi
 
 avisar() { # topico arquivo_aviso titulo prioridade tags texto
   [ -z "$1" ] && return
-  curl -s -m 20 -o /dev/null -H "Title: $3" -H "Priority: $4" -H "Tags: $5" \
-    -H "Click: ${RUN_URL:-}" -d "$6" "https://ntfy.sh/$1"
+  for t in $1; do
+    curl -s -m 20 -o /dev/null -H "Title: $3" -H "Priority: $4" -H "Tags: $5" \
+      -H "Click: ${RUN_URL:-}" -d "$6" "https://ntfy.sh/$t"
+  done
   echo "$agora_s" > "$2"
 }
 
