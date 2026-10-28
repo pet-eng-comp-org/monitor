@@ -16,3 +16,4 @@ sites	game-jam	https://gamejam.pet.inf.ufes.br/
 sites	game-jam-api	https://apigamejam.pet.inf.ufes.br/seasons/atual	.id != null	
 sites	ct-portas-abertas	https://ctportasabertas.pet.inf.ufes.br/		
 sites	avaliacao-360	https://avaliacao360.pet.inf.ufes.br/api/auth/providers	.google.id == "google"	
+sites	boca-game-jam	https://boca.pet.inf.ufes.br/boca/	texto:BOCA Online Contest Administrator	
