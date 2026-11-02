@@ -49,15 +49,20 @@ for mp in / /var/lib/docker; do
 done
 
 # Containers parados, reiniciando ou unhealthy. Stack parada de proposito no
-# Portainer remove os containers, entao nao aparece aqui.
-while IFS=$'\t' read -r nome estado saude; do
+# Portainer remove os containers, entao nao aparece aqui. Container de uma vez
+# so (restart "no", como o init do boca-game-jam) que terminou com codigo 0 fez
+# o trabalho dele: nao e queda.
+# A saude vai por ultimo: vazia no meio, o read juntaria as tabulacoes e
+# deslocaria os campos.
+while IFS=$'\t' read -r nome estado codigo politica saude; do
   [ "$uptime_s" -lt "$GRACA_S" ] && continue
+  [ "$estado" = exited ] && [ "$codigo" = 0 ] && [ "$politica" = no ] && continue
   case "$estado" in
     running) [ "$saude" = unhealthy ] && problemas+=("unhealthy:$nome"$'\t'"$nome unhealthy") ;;
     *)       problemas+=("parado:$nome"$'\t'"$nome em estado $estado") ;;
   esac
 done < <(docker ps -a --format '{{.Names}}' | xargs -r docker inspect \
-          --format '{{.Name}}{{"\t"}}{{.State.Status}}{{"\t"}}{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+          --format '{{.Name}}{{"\t"}}{{.State.Status}}{{"\t"}}{{.State.ExitCode}}{{"\t"}}{{.HostConfig.RestartPolicy.Name}}{{"\t"}}{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
           | sed 's#^/##')
 
 # Loop de reinicio: o RestartCount cresce mesmo quando o container aparece "running".
