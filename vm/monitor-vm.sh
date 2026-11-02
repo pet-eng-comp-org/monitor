@@ -19,7 +19,7 @@ uptime_s=$(cut -d. -f1 /proc/uptime)
 
 # Portainer: a VM nao alcanca o 9443 pelo host (DOCKER-USER so aceita a VPN), entao
 # a chamada sai de um container na rede do proprio Portainer, como no backup.
-if ! docker run --rm --network container:portainer curlimages/curl:latest \
+if ! docker run --rm --network container:portainer curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93 \
      -skf -m 15 -o /dev/null https://localhost:9443/api/status 2>/dev/null; then
   problemas+=("portainer"$'\t'"Portainer nao responde em /api/status")
   portainer_fora=1
@@ -30,7 +30,7 @@ fi
 # ufes.br). A VM nao esta na lista da VPN, entao o certo daqui e 403; 000 e TLS
 # invalido ou rota sumida. Avisa 14 dias antes de vencer (o Traefik renova com 30).
 tf=$(docker inspect traefik --format '{{(index .NetworkSettings.Networks "traefik").IPAddress}}' 2>/dev/null)
-saida=$(docker run --rm --network traefik curlimages/curl:latest -s -m 15 -o /dev/null \
+saida=$(docker run --rm --network traefik curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93 -s -m 15 -o /dev/null \
   -w '%{http_code}\n%{certs}' --resolve "docker.pet.inf.ufes.br:9443:$tf" \
   https://docker.pet.inf.ufes.br:9443/ 2>/dev/null)
 code=$(head -1 <<<"$saida")
@@ -107,7 +107,7 @@ atrasado() {
 printf 'X-API-Key: %s\n' "$(cat "$PORTAINER_TOKEN" 2>/dev/null)" > "$SEG/portainer"
 if [ -n "${portainer_fora:-}" ]; then
   :  # ja avisado acima; sem a API nao ha o que comparar
-elif docker run --rm --user root --network container:portainer -v "$SEG:/seg" curlimages/curl:latest \
+elif docker run --rm --user root --network container:portainer -v "$SEG:/seg" curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93 \
      -skf -m 30 -H @/seg/portainer -o /seg/stacks.json https://localhost:9443/api/stacks 2>/dev/null; then
   declare -A token_visto=()
   # Separador \x1f, nao tab: tab e espaco em branco para o read, e ReferenceName
@@ -227,7 +227,7 @@ echo "$agora" > "$ESTADO/falhando.txt"
 # problema, entao nao entra em falhando.txt nem no lembrete de 6 h (e devolve o
 # relogio do lembrete como estava). Atualizar continua a pedido, com o
 # portainer-atualiza: copia o banco (que migra na primeira subida) e volta sozinho.
-if [ -z "${portainer_fora:-}" ] && docker run --rm --user root --network container:portainer -v "$SEG:/seg" curlimages/curl:latest \
+if [ -z "${portainer_fora:-}" ] && docker run --rm --user root --network container:portainer -v "$SEG:/seg" curlimages/curl:8.23.0@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93 \
      -skf -m 30 -H @/seg/portainer -o /seg/versao.json https://localhost:9443/api/system/version 2>/dev/null; then
   nova=$(jq -r 'select(.UpdateAvailable == true) | .LatestVersion // empty' "$SEG/versao.json")
   if [ -n "$nova" ] && [ "$nova" != "$(cat "$ESTADO/portainer-avisado" 2>/dev/null)" ]; then
