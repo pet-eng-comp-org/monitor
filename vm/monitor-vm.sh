@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Checagens de dentro da VM, a cada 5 min pelo cron do root. Avisa no ntfy (topico
 # em /opt/monitor/.ntfy-topic) so quando o estado muda, com lembrete a cada 6 h.
-# A VM inteira fora do ar e coberta de fora, pelo workflow do repositorio.
+# A VM inteira fora do ar e coberta de fora: pelo workflow do repositorio (que o
+# GitHub roda de horas em horas) e pelo healthchecks.io, que avisa se o sinal de
+# vida mandado no fim de cada rodada para de chegar (endereco em $DIR/.hc-url).
 set -uo pipefail
 
 DIR=/opt/monitor
@@ -10,8 +12,10 @@ TOPICO=$(cat "$DIR/.ntfy-topic" 2>/dev/null)
 DISCO_LIMITE=${DISCO_LIMITE:-85}
 LOOP_LIMITE=3          # reinicios de um mesmo container entre duas rodadas
 LEMBRETE_S=$((6 * 3600))
+GRACA_S=$((15 * 60))   # logo depois do boot, containers em loop sao a VM subindo
 
 problemas=()   # "chave<TAB>descricao"; a chave identifica o problema entre rodadas
+uptime_s=$(cut -d. -f1 /proc/uptime)
 
 # Portainer: a VM nao alcanca o 9443 pelo host (DOCKER-USER so aceita a VPN), entao
 # a chamada sai de um container na rede do proprio Portainer, como no backup.
@@ -19,6 +23,24 @@ if ! docker run --rm --network container:portainer curlimages/curl:latest \
      -skf -m 15 -o /dev/null https://localhost:9443/api/status 2>/dev/null; then
   problemas+=("portainer"$'\t'"Portainer nao responde em /api/status")
   portainer_fora=1
+fi
+
+# Portainer pelo endereco de uso (https://docker.pet.inf.ufes.br:9443, Traefik com
+# Let's Encrypt). Com certificado invalido o Chrome nem deixa prosseguir (HSTS do
+# ufes.br). A VM nao esta na lista da VPN, entao o certo daqui e 403; 000 e TLS
+# invalido ou rota sumida. Avisa 14 dias antes de vencer (o Traefik renova com 30).
+tf=$(docker inspect traefik --format '{{(index .NetworkSettings.Networks "traefik").IPAddress}}' 2>/dev/null)
+saida=$(docker run --rm --network traefik curlimages/curl:latest -s -m 15 -o /dev/null \
+  -w '%{http_code}\n%{certs}' --resolve "docker.pet.inf.ufes.br:9443:$tf" \
+  https://docker.pet.inf.ufes.br:9443/ 2>/dev/null)
+code=$(head -1 <<<"$saida")
+if [ "$code" != 403 ]; then
+  problemas+=("portainer-tls"$'\t'"Portainer em docker.pet.inf.ufes.br:9443 respondeu '$code' (esperado 403 daqui): certificado invalido ou rota do Traefik sumiu")
+else
+  vence=$(sed -n 's/^Expire date: *//p' <<<"$saida" | head -1)
+  vence_s=$(date -d "$vence" +%s 2>/dev/null || echo 0)
+  [ $(( vence_s - $(date +%s) )) -lt $((14 * 86400)) ] && \
+    problemas+=("portainer-cert"$'\t'"Certificado de docker.pet.inf.ufes.br vence em $(date -d "$vence" +%d/%m/%Y): Traefik nao renovou (docker logs traefik | grep -i acme)")
 fi
 
 for mp in / /var/lib/docker; do
@@ -29,6 +51,7 @@ done
 # Containers parados, reiniciando ou unhealthy. Stack parada de proposito no
 # Portainer remove os containers, entao nao aparece aqui.
 while IFS=$'\t' read -r nome estado saude; do
+  [ "$uptime_s" -lt "$GRACA_S" ] && continue
   case "$estado" in
     running) [ "$saude" = unhealthy ] && problemas+=("unhealthy:$nome"$'\t'"$nome unhealthy") ;;
     *)       problemas+=("parado:$nome"$'\t'"$nome em estado $estado") ;;
@@ -41,7 +64,7 @@ done < <(docker ps -a --format '{{.Names}}' | xargs -r docker inspect \
 atuais=$(docker ps -a --format '{{.Names}}' | xargs -r docker inspect --format '{{.Name}} {{.RestartCount}}' | sed 's#^/##')
 while read -r nome n; do
   antes=$(awk -v c="$nome" '$1==c{print $2}' "$ESTADO/restarts.txt")
-  [ -n "$antes" ] && [ $((n - antes)) -ge "$LOOP_LIMITE" ] && \
+  [ "$uptime_s" -ge "$GRACA_S" ] && [ -n "$antes" ] && [ $((n - antes)) -ge "$LOOP_LIMITE" ] && \
     problemas+=("loop:$nome"$'\t'"$nome reiniciou $((n - antes))x em 5 min")
 done <<< "$atuais"
 echo "$atuais" > "$ESTADO/restarts.txt"
@@ -141,6 +164,24 @@ else
   problemas+=("deploy-api"$'\t'"API do Portainer recusou /api/stacks: checagem de deploy parada (token em $PORTAINER_TOKEN?)")
 fi
 
+# Token que baixa as imagens do GHCR (vm-pet-ghcr, conta pet-eng-comp-ufes,
+# so read:packages). Usado no docker login do root e no registro "GHCR" do
+# Portainer; se vencer, nenhuma stack consegue baixar imagem nova.
+GHCR_TOKEN=/root/.gh-vm-pet-ghcr
+if [ -r "$GHCR_TOKEN" ]; then
+  printf 'Authorization: Bearer %s\n' "$(cat "$GHCR_TOKEN")" > "$SEG/ghcr"
+  rm -f "$SEG/cab-ghcr"
+  code=$(curl -s -m 20 -o /dev/null -D "$SEG/cab-ghcr" -w '%{http_code}' -H @"$SEG/ghcr" https://api.github.com/user)
+  if [ "$code" != 200 ]; then
+    problemas+=("token-ghcr"$'\t'"Token vm-pet-ghcr (imagens do GHCR) recusado pelo GitHub (HTTP $code): stacks nao baixam imagem nova")
+  else
+    vence=$(tr -d '\r' < "$SEG/cab-ghcr" | sed -n 's/^github-authentication-token-expiration: //Ip')
+    vence_s=; [ -n "$vence" ] && vence_s=$(date -d "$vence" +%s 2>/dev/null)
+    [ -n "$vence_s" ] && [ $(( vence_s - $(date +%s) )) -lt "$TOKEN_AVISO_S" ] && \
+      problemas+=("token-vence:ghcr"$'\t'"Token vm-pet-ghcr vence em $(date -d "$vence" +%d/%m/%Y): criar outro na conta pet-eng-comp-ufes e trocar em $GHCR_TOKEN, no docker login do root e no registro GHCR do Portainer")
+  fi
+fi
+
 agora=$(printf '%s\n' "${problemas[@]}" | cut -f1 | sed '/^$/d' | sort)
 antes=$(sort "$ESTADO/falhando.txt")
 novas=$(comm -13 <(echo "$antes") <(echo "$agora") | sed '/^$/d')
@@ -155,8 +196,48 @@ avisar() { # titulo prioridade tags texto
   echo "$agora_s" > "$ESTADO/aviso"
 }
 
+# Boot novo: um aviso so, com quanto tempo a VM ficou fora e se desligou direito.
+boot=$(cat /proc/sys/kernel/random/boot_id)
+if [ "$(cat "$ESTADO/boot" 2>/dev/null)" != "$boot" ]; then
+  if [ -s "$ESTADO/boot" ]; then
+    ligou=$(uptime -s)
+    fim=$(journalctl -b -1 -n 1 -o short-iso --no-pager 2>/dev/null | awk 'NR==1{print $1}')
+    if journalctl -b -1 -n 300 --no-pager 2>/dev/null | grep -qE 'Reached target .*(Power-Off|Reboot|System Reboot)|systemd-shutdown|Journal stopped'; then
+      como="desligamento normal"
+    else
+      como="desligou de repente (queda de energia ou do host do LAR?)"
+    fi
+    if [ -n "$fim" ]; then
+      fora="fora desde $(date -d "$fim" '+%d/%m %H:%M'), $(( ($(date -d "$ligou" +%s) - $(date -d "$fim" +%s)) / 60 )) min"
+    else
+      fora="sem registro do boot anterior"
+    fi
+    avisar "VM: reiniciou" high arrows_counterclockwise "Ligou $(date -d "$ligou" '+%d/%m %H:%M'); $fora; $como. Reinicios de container nos primeiros $((GRACA_S / 60)) min nao viram alerta."
+  fi
+  echo "$boot" > "$ESTADO/boot"
+fi
+
 [ -n "$resolvidas" ] && avisar "VM: resolvido" default white_check_mark "$(echo $resolvidas)"
 if [ -n "$novas" ]; then avisar "VM: problema novo" high rotating_light "$detalhes"
 elif [ -n "$agora" ] && [ $((agora_s - ultimo)) -ge $LEMBRETE_S ]; then avisar "VM: ainda com problema" high warning "$detalhes"; fi
 
 echo "$agora" > "$ESTADO/falhando.txt"
+
+# Versao nova do Portainer: um aviso por versao, prioridade normal. Nao e
+# problema, entao nao entra em falhando.txt nem no lembrete de 6 h (e devolve o
+# relogio do lembrete como estava). Atualizar continua a pedido, com o
+# portainer-atualiza: copia o banco (que migra na primeira subida) e volta sozinho.
+if [ -z "${portainer_fora:-}" ] && docker run --rm --user root --network container:portainer -v "$SEG:/seg" curlimages/curl:latest \
+     -skf -m 30 -H @/seg/portainer -o /seg/versao.json https://localhost:9443/api/system/version 2>/dev/null; then
+  nova=$(jq -r 'select(.UpdateAvailable == true) | .LatestVersion // empty' "$SEG/versao.json")
+  if [ -n "$nova" ] && [ "$nova" != "$(cat "$ESTADO/portainer-avisado" 2>/dev/null)" ]; then
+    relogio=$(cat "$ESTADO/aviso")
+    avisar "VM: Portainer $nova disponivel" default package \
+      "Rodando $(jq -r '.ServerVersion' "$SEG/versao.json"). Atualizar na VM: sudo portainer-atualiza 'portainer/portainer-ce:$nova@sha256:<digest>'"
+    echo "$relogio" > "$ESTADO/aviso"
+    echo "$nova" > "$ESTADO/portainer-avisado"
+  fi
+fi
+
+# Sinal de vida para o healthchecks.io: se parar de chegar, ele avisa no ntfy.
+if [ -r "$DIR/.hc-url" ]; then curl -fsS -m 10 --retry 3 -o /dev/null "$(cat "$DIR/.hc-url")"; fi
